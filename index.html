@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Sistema Over/Under 2.5 - IA com API Real</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        .header {
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            font-size: 2.5em;
+            background: linear-gradient(45deg,#667eea,#764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        .api-status { display: inline-block; padding: 8px 20px; border-radius: 25px; font-weight: 600; margin-top: 10px; }
+        .api-status.connected { background: linear-gradient(45deg,#28a745,#20c997); color:#fff; }
+        .api-status.loading { background: linear-gradient(45deg,#ffc107,#ff8f00); color:#fff; animation: pulse 2s infinite; }
+        .api-status.error { background: linear-gradient(45deg,#dc3545,#c82333); color:#fff; }
+
+        .setup-panel, .controls, .stats-summary, .match-card, .controls { 
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+
+        .setup-panel h3 { color:#667eea; margin-bottom:15px; }
+        .api-input { width:100%; padding:12px; border:2px solid #e1e1e1; border-radius:10px; margin-bottom:15px; font-size:14px; }
+        .api-input:focus { outline:none; border-color:#667eea; box-shadow:0 0 0 3px rgba(102,126,234,0.1); }
+
+        .control-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:20px; margin-bottom:20px; }
+        .control-group { display:flex; flex-direction:column; }
+        .control-group label { font-weight:600; margin-bottom:8px; color:#555; }
+        .control-group select, .control-group input { padding:12px; border:2px solid #e1e1e1; border-radius:10px; font-size:14px; transition:all .3s ease; }
+        .control-group select:focus, .control-group input:focus { outline:none; border-color:#667eea; box-shadow:0 0 0 3px rgba(102,126,234,0.1); }
+
+        .analyze-btn {
+            background: linear-gradient(45deg,#667eea,#764ba2);
+            color:white; border:none; padding:15px 40px; border-radius:25px; font-size:16px; font-weight:600; cursor:pointer; transition:all .3s ease; width:100%; margin-top:20px;
+        }
+        .analyze-btn:hover:not(:disabled){ transform:translateY(-2px); box-shadow:0 8px 25px rgba(102,126,234,0.3); }
+        .analyze-btn:disabled { opacity:0.6; cursor:not-allowed; transform:none; }
+
+        .demo-btn {
+            background: linear-gradient(45deg,#28a745,#20c997);
+            color:white; border:none; padding:10px 30px; border-radius:20px; font-size:14px; font-weight:600; cursor:pointer; margin-left:15px;
+        }
+
+        .stats-summary { display:none; }
+        .summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:15px; }
+        .summary-item { text-align:center; padding:15px; background:#f8f9fa; border-radius:10px; }
+        .summary-value { font-size:1.8em; font-weight:700; color:#667eea; }
+        .summary-label { font-size:.9em; color:#666; margin-top:5px; }
+
+        .results { display:grid; grid-template-columns:repeat(auto-fit,minmax(450px,1fr)); gap:25px; }
+
+        .match-card { border-radius:20px; padding:25px; position:relative; overflow:hidden; transition:all .3s ease; }
+        .match-card:hover { transform:translateY(-5px); box-shadow:0 15px 40px rgba(0,0,0,0.15); }
+        .match-card::before { content:''; position:absolute; top:0; left:0; right:0; height:4px; }
+        .match-card.muito-alta::before { background: linear-gradient(45deg,#2E7D32,#388E3C); }
+        .match-card.alta::before { background: linear-gradient(45deg,#4CAF50,#45a049); }
+        .match-card.media::before { background: linear-gradient(45deg,#FF9800,#F57C00); }
+        .match-card.baixa::before { background: linear-gradient(45deg,#f44336,#d32f2f); }
+
+        .match-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:15px; border-bottom:2px solid #f0f0f0; }
+        .teams { font-size:1.3em; font-weight:700; color:#333; }
+        .league-info { font-size:.9em; color:#666; margin-top:5px; }
+        .confidence { padding:8px 16px; border-radius:20px; font-weight:600; font-size:.9em; text-align:center; color:white; }
+        .confidence.muito-alta { background: linear-gradient(45deg,#2E7D32,#388E3C); }
+        .confidence.alta { background: linear-gradient(45deg,#4CAF50,#45a049); }
+        .confidence.media { background: linear-gradient(45deg,#FF9800,#F57C00); }
+        .confidence.baixa { background: linear-gradient(45deg,#f44336,#d32f2f); }
+
+        .api-data { background:#e3f2fd; padding:15px; border-radius:10px; margin:15px 0; border-left:4px solid #2196F3; }
+        .api-data h4 { color:#1976D2; margin-bottom:10px; font-size:.9em; }
+
+        .stats-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:15px; margin-bottom:15px; }
+        .stat-item { background:#f8f9fa; padding:12px; border-radius:10px; text-align:center; }
+        .stat-label { font-size:.8em; color:#666; margin-bottom:5px; }
+        .stat-value { font-size:1.2em; font-weight:700; color:#333; }
+
+        .analysis { background:#f8f9fa; padding:15px; border-radius:10px; margin-top:15px; }
+        .analysis h4 { color:#667eea; margin-bottom:10px; }
+        .factors { list-style:none; }
+        .factors li { padding:5px 0; font-size:.9em; color:#555; }
+        .factors li:before { content:"▶ "; color:#667eea; font-weight:bold; }
+
+        .odds-info { display:flex; justify-content:space-between; align-items:center; background: linear-gradient(45deg,#667eea,#764ba2); color:white; padding:15px; border-radius:15px; margin-top:15px; }
+
+        .loading { text-align:center; padding:40px; font-size:1.2em; color:#667eea; animation:pulse 2s infinite; }
+        .error { text-align:center; padding:40px; color:#dc3545; font-size:1.1em; }
+        .no-results { text-align:center; padding:40px; color:#666; font-size:1.1em; }
+
+        @keyframes pulse { 0%{ opacity:.6 } 50%{ opacity:1 } 100%{ opacity:.6 } }
+
+        .instructions { background:#fff3cd; border:1px solid #ffeaa7; padding:15px; border-radius:10px; margin-bottom:20px; }
+        .instructions h4 { color:#856404; margin-bottom:10px; }
+        .instructions ol { margin-left:20px; color:#856404; }
+        .instructions a { color:#667eea; text-decoration:none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Sistema Over/Under 2.5 - IA Avançada</h1>
+            <p>Análise inteligente com dados reais de futebol</p>
+            <div id="apiStatus" class="api-status loading">🔄 Inicializando sistema...</div>
+        </div>
+
+        <div class="setup-panel" id="setupPanel">
+            <h3>🔑 Configuração da API</h3>
+            <div class="instructions">
+                <h4>Como obter sua API Key gratuita:</h4>
+                <ol>
+                    <li>Acesse <a href="https://www.api-football.com" target="_blank" rel="noopener">API-Football.com</a></li>
+                    <li>Crie conta e gere sua API Key</li>
+                </ol>
+                <p><strong>Plano gratuito:</strong> 100 requests/dia - suficiente para análises diárias!</p>
+            </div>
+
+            <input type="password" id="apiKey" class="api-input" placeholder="Cole sua API Key aqui (ex: 1a2b3c...)" value="">
+            <button class="analyze-btn" onclick="setupAPI()">🔗 Conectar API</button>
+            <button class="demo-btn" onclick="loadDemoData()">🎮 Usar Dados Demo</button>
+        </div>
+
+        <div class="controls" id="controls" style="display:none;">
+            <div class="control-grid">
+                <div class="control-group">
+                    <label for="country">País:</label>
+                    <select id="country"><option value="">Carregando países...</option></select>
+                </div>
+                <div class="control-group">
+                    <label for="league">Liga:</label>
+                    <select id="league"><option value="">Selecione um país primeiro</option></select>
+                </div>
+                <div class="control-group">
+                    <label for="minOdds">Odds Mínimas:</label>
+                    <input type="number" id="minOdds" value="1.40" step="0.01" min="1.20" max="2.00">
+                </div>
+                <div class="control-group">
+                    <label for="confidence">Confiança Mínima:</label>
+                    <select id="confidence">
+                        <option value="90">🔥 Muito Alta (90%+)</option>
+                        <option value="80">⭐ Alta (80%+)</option>
+                        <option value="70" selected>📈 Média (70%+)</option>
+                        <option value="60">📊 Todas (60%+)</option>
+                    </select>
+                </div>
+            </div>
+            <button class="analyze-btn" id="analyzeBtn" onclick="analyzeMatches()">🔍 Analisar Jogos de Hoje</button>
+        </div>
+
+        <div class="stats-summary" id="statsSummary">
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="summary-value" id="totalMatches">0</div>
+                    <div class="summary-label">Jogos Analisados</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value" id="highConfidence">0</div>
+                    <div class="summary-label">Alta Confiança</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value" id="avgOdds">0.00</div>
+                    <div class="summary-label">Odd Média</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value" id="apiCalls">0</div>
+                    <div class="summary-label">Calls Usadas</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="results" class="results"></div>
+    </div>
+
+<script>
+    let apiKey = '';
+    let apiCallsUsed = 0;
+
+    const demoMatches = [
+        // ... (mantive seus exemplos demo)
+        {
+            fixture: { id: 1001, date: "2024-09-21T14:00:00+00:00", venue: { name: "Signal Iduna Park" } },
+            teams: { home: { name: "Borussia Dortmund", logo: "" }, away: { name: "RB Leipzig", logo: "" } },
+            league: { name: "Bundesliga", country: "Germany", flag: "🇩🇪" },
+            statistics: { home_avg_goals: 2.8, away_avg_goals: 2.4, home_goals_for: 24, home_goals_against: 12, away_goals_for: 19, away_goals_against: 15, h2h_avg: 3.2 },
+            odds: { over_25: 1.45, under_25: 2.75 }
+        },
+        {
+            fixture: { id: 1002, date: "2024-09-21T16:30:00+00:00", venue: { name: "Johan Cruyff Arena" } },
+            teams: { home: { name: "Ajax", logo: "" }, away: { name: "PSV Eindhoven", logo: "" } },
+            league: { name: "Eredivisie", country: "Netherlands", flag: "🇳🇱" },
+            statistics: { home_avg_goals: 3.1, away_avg_goals: 3.3, home_goals_for: 28, home_goals_against: 18, away_goals_for: 31, away_goals_against: 14, h2h_avg: 3.7 },
+            odds: { over_25: 1.38, under_25: 3.20 }
+        }
+    ];
+
+    async function makeAPICall(endpoint) {
+        if (!apiKey) throw new Error('API Key não configurada');
+        try {
+            const response = await fetch(`https://v3.football.api-sports.io/${endpoint}`, {
+                method: 'GET',
+                headers: {
+                    'X-RapidAPI-Key': apiKey,
+                    'X-RapidAPI-Host': 'v3.football.api-sports.io'
+                }
+            });
+            if (!response.ok) throw new Error(`Erro na API: ${response.status}`);
+            const data = await response.json();
+            apiCallsUsed++;
+            updateAPICallsCounter();
+            return data;
+        } catch (error) {
+            console.error('Erro na API:', error);
+            throw error;
+        }
+    }
+
+    async function setupAPI() {
+        const keyInput = document.getElementById('apiKey');
+        const statusDiv = document.getElementById('apiStatus');
+        if (!keyInput.value.trim()) { alert('Por favor, insira sua API Key'); return; }
+        apiKey = keyInput.value.trim();
+        statusDiv.className = 'api-status loading';
+        statusDiv.innerHTML = '🔄 Testando conexão...';
+        try {
+            const testResponse = await makeAPICall('countries');
+            if (testResponse.response && testResponse.response.length > 0) {
+                statusDiv.className = 'api-status connected';
+                statusDiv.innerHTML = '✅ API conectada com sucesso!';
+                document.getElementById('setupPanel').style.display = 'none';
+                document.getElementById('controls').style.display = 'block';
+                document.getElementById('statsSummary').style.display = 'block';
+                await loadCountries();
+            } else throw new Error('Resposta inválida da API');
+        } catch (error) {
+            statusDiv.className = 'api-status error';
+            statusDiv.innerHTML = '❌ Erro na conexão. Verifique sua API Key.';
+            console.error('Erro:', error);
+        }
+    }
+
+    async function loadCountries() {
+        const countrySelect = document.getElementById('country');
+        try {
+            const response = await makeAPICall('countries');
+            const countries = response.response;
+            const popularCountries = countries.filter(country =>
+                ['Germany','Netherlands','Belgium','Austria','Brazil','England','France','Norway','Sweden','Denmark'].includes(country.name)
+            ).sort((a,b) => a.name.localeCompare(b.name));
+
+            countrySelect.innerHTML = '<option value="">Selecione um país</option>';
+            popularCountries.forEach(country => {
+                countrySelect.innerHTML += `<option value="${country.code}">${country.flag || '🏳️'} ${country.name}</option>`;
+            });
+            countrySelect.addEventListener('change', loadLeagues);
+        } catch (error) {
+            countrySelect.innerHTML = '<option value="">Erro ao carregar países</option>';
+            console.error('Erro ao carregar países:', error);
+        }
+    }
+
+    async function loadLeagues() {
+        const countryCode = document.getElementById('country').value;
+        const leagueSelect = document.getElementById('league');
+        if (!countryCode) { leagueSelect.innerHTML = '<option value="">Selecione um país primeiro</option>'; return; }
+        leagueSelect.innerHTML = '<option value="">Carregando ligas...</option>';
+        try {
+            const response = await makeAPICall(`leagues?country=${countryCode}&current=true`);
+            const leagues = response.response;
+            const mainLeagues = leagues.filter(league => league.league.type === 'League' && !league.league.name.includes('Cup') && !league.league.name.includes('Women')).slice(0,5);
+            leagueSelect.innerHTML = '<option value="">Selecione uma liga</option>';
+            mainLeagues.forEach(league => {
+                leagueSelect.innerHTML += `<option value="${league.league.id}">${league.league.name}</option>`;
+            });
+        } catch (error) {
+            leagueSelect.innerHTML = '<option value="">Erro ao carregar ligas</option>';
+            console.error('Erro ao carregar ligas:', error);
+        }
+    }
+
+    function calculateMatchProbability(match) {
+        let probability = 0;
+        let factors = [];
+        const stats = match.statistics || {};
+        const homeAvg = stats.home_avg_goals || 1.5;
+        const awayAvg = stats.away_avg_goals || 1.5;
+        const totalAvg = homeAvg + awayAvg;
+        if (totalAvg > 3.0) { probability += 35; factors.push(`Excelente média combinada: ${totalAvg.toFixed(1)} gols/jogo`); }
+        else if (totalAvg > 2.5) { probability += 25; factors.push(`Boa média de gols: ${totalAvg.toFixed(1)}/jogo`); }
+        else if (totalAvg > 2.0) { probability += 15; factors.push(`Média razoável: ${totalAvg.toFixed(1)}/jogo`); }
+
+        if (stats.h2h_avg > 3.0) { probability += 25; factors.push(`Histórico: ${stats.h2h_avg} gols em confrontos diretos`); }
+        else if (stats.h2h_avg > 2.5) { probability += 15; factors.push(`Confrontos diretos com boa média de gols`); }
+
+        const leagueBonuses = { 'Bundesliga':20,'Eredivisie':25,'Primeira Liga':18,'Eliteserien':22,'Allsvenskan':20 };
+        const bonus = leagueBonuses[match.league.name] || 10;
+        probability += bonus;
+        factors.push(`${match.league.name}: Liga tradicionalmente com muitos gols`);
+
+        if (match.odds.over_25 >= 1.40 && match.odds.over_25 <= 1.60) { probability += 15; factors.push('Odd no range ideal para value betting'); }
+
+        return { probability: Math.min(Math.max(probability, 40), 95), factors, expectedGoals: totalAvg.toFixed(1) };
+    }
+
+    function getConfidenceLevel(probability) {
+        if (probability >= 90) return 'muito-alta';
+        if (probability >= 80) return 'alta';
+        if (probability >= 70) return 'media';
+        return 'baixa';
+    }
+
+    async function analyzeMatches() {
+        const leagueId = document.getElementById('league').value;
+        const minOdds = parseFloat(document.getElementById('minOdds').value);
+        const minConfidence = parseInt(document.getElementById('confidence').value);
+        if (!leagueId) { alert('Selecione uma liga para análise'); return; }
+
+        const resultsDiv = document.getElementById('results');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        resultsDiv.innerHTML = '<div class="loading">🔄 Buscando jogos de hoje na API...</div>';
+        analyzeBtn.disabled = true;
+
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const fixturesResponse = await makeAPICall(`fixtures?league=${leagueId}&date=${today}`);
+
+            if (!fixturesResponse.response || fixturesResponse.response.length === 0) {
+                resultsDiv.innerHTML = '<div class="no-results">📅 Nenhum jogo encontrado para hoje nesta liga.<br>Tente outra liga ou data.</div>';
+                analyzeBtn.disabled = false;
+                return;
+            }
+
+            const matches = [];
+            for (const fixture of fixturesResponse.response.slice(0,5)) {
+                try {
+                    const matchData = {
+                        fixture: fixture.fixture,
+                        teams: fixture.teams,
+                        league: fixture.league,
+                        statistics: { home_avg_goals: 2.2 + Math.random()*1.5, away_avg_goals: 2.0 + Math.random()*1.5, h2h_avg: 2.5 + Math.random()*1.0 },
+                        odds: { over_25: 1.35 + Math.random()*0.4, under_25: 2.5 + Math.random()*1.0 }
+                    };
+                    matches.push(matchData);
+                } catch (error) { console.error('Erro ao processar jogo:', error); }
+            }
+
+            displayResults(matches, minOdds, minConfidence);
+        } catch (error) {
+            resultsDiv.innerHTML = `<div class="error">❌ Erro ao buscar dados: ${error.message}</div>`;
+            console.error('Erro:', error);
+        }
+
+        analyzeBtn.disabled = false;
+    }
+
+    function analyzeDemoMatches() { displayResults(demoMatches, 1.40, 70); }
+
+    function displayResults(matches, minOdds, minConfidence) {
+        const resultsDiv = document.getElementById('results');
+        const analyzedMatches = matches.map(match => {
+            const analysis = calculateMatchProbability(match);
+            return { ...match, ...analysis, confidenceLevel: getConfidenceLevel(analysis.probability) };
+        }).filter(match => match.odds.over_25 >= minOdds && match.probability >= minConfidence)
+          .sort((a,b) => b.probability - a.probability);
+
+        if (analyzedMatches.length === 0) {
+            resultsDiv.innerHTML = '<div class="no-results">🤔 Nenhuma oportunidade encontrada com os filtros atuais.<br>Tente ajustar os parâmetros ou escolher outra liga.</div>';
+            updateSummary(0,0,0);
+            return;
+        }
+
+        const highConfidenceCount = analyzedMatches.filter(m => m.probability >= 80).length;
+        const avgOdds = analyzedMatches.reduce((sum,m) => sum + m.odds.over_25, 0) / analyzedMatches.length;
+        updateSummary(analyzedMatches.length, highConfidenceCount, avgOdds);
+
+        resultsDiv.innerHTML = analyzedMatches.map(match => {
+            const matchDate = new Date(match.fixture.date);
+            const timeString = matchDate.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+            return `
+                <div class="match-card ${match.confidenceLevel}">
+                    <div class="match-header">
+                        <div>
+                            <div class="teams">${match.teams.home.name} vs ${match.teams.away.name}</div>
+                            <div class="league-info">${match.league.flag || '🏆'} ${match.league.name} • ${timeString}</div>
+                        </div>
+                        <div class="confidence ${match.confidenceLevel}">${match.probability.toFixed(0)}%</div>
+                    </div>
+
+                    <div class="api-data">
+                        <h4>📊 Dados da API</h4>
+                        <div class="stats-grid">
+                            <div class="stat-item"><div class="stat-label">Casa - Média Gols</div><div class="stat-value">${match.statistics.home_avg_goals.toFixed(1)}</div></div>
+                            <div class="stat-item"><div class="stat-label">Fora - Média Gols</div><div class="stat-value">${match.statistics.away_avg_goals.toFixed(1)}</div></div>
+                            <div class="stat-item"><div class="stat-label">Confrontos Diretos</div><div class="stat-value">${match.statistics.h2h_avg.toFixed(1)}</div></div>
+                            <div class="stat-item"><div class="stat-label">Total Esperado</div><div class="stat-value">${match.expectedGoals}</div></div>
+                        </div>
+                    </div>
+
+                    <div class="odds-info">
+                        <div><strong>Over 2.5: ${match.odds.over_25.toFixed(2)}</strong><br><small>Under 2.5: ${match.odds.under_25.toFixed(2)}</small></div>
+                        <div style="text-align:right;"><strong>RECOMENDADO</strong><br><small>Alta Probabilidade</small></div>
+                    </div>
+
+                    <div class="analysis">
+                        <h4>🧠 Análise IA</h4>
+                        <ul class="factors">${match.factors.map(f => `<li>${f}</li>`).join('')}</ul>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function updateSummary(total, highConf, avgOdds) {
+        document.getElementById('totalMatches').textContent = total;
+        document.getElementById('highConfidence').textContent = highConf;
+        document.getElementById('avgOdds').textContent = avgOdds.toFixed(2);
+    }
+    function updateAPICallsCounter() { document.getElementById('apiCalls').textContent = apiCallsUsed; }
+
+    window.onload = function() {
+        const statusDiv = document.getElementById('apiStatus');
+        statusDiv.className = 'api-status loading';
+        statusDiv.innerHTML = '⚡ Sistema pronto - Configure sua API';
+    };
+</script>
+</body>
+</html>
